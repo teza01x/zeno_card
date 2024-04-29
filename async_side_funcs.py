@@ -24,6 +24,12 @@ async def is_valid_solana_address(tx_hash):
         return False
 
 
+async def is_valid_tron_tx_hash(tx_hash):
+    pattern = r'^(0x)?[a-fA-F0-9]{64}$'
+    match = re.match(pattern, tx_hash)
+    return bool(match)
+
+
 async def top_up_card_balance(card_iban, topup_amount):
     url = "https://api.pst.net/integration/transfer/transfer"
     headers = {
@@ -248,5 +254,6 @@ async def webhook_send_request():
 #         print(address, private_key)
 #
 #         await insert_solana_data(user_id, address, private_key)
+
 
 

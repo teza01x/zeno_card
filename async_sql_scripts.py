@@ -11,12 +11,12 @@ async def check_user_exists(user_id):
         return bool(len(user))
 
 
-async def add_user_to_db(user_id, username, eth_address, eth_private_key, solana_adr, solana_private_key):
+async def add_user_to_db(user_id, username, eth_address, eth_private_key, solana_adr, solana_private_key, tron_wallet, tron_pkey):
     async with aiosqlite.connect(data_base) as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
-                "INSERT INTO user (user_id, username, menu_status, wallet_address, private_wallet_key, cards_id, account_balance, mask, secure_code, code_status, solana_wallet_address, solana_private_key, card_limit) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (user_id, username, 0, eth_address, eth_private_key, "", 0, "", "", 0, solana_adr, solana_private_key, 1002))
+                "INSERT INTO user (user_id, username, menu_status, wallet_address, private_wallet_key, cards_id, account_balance, mask, secure_code, code_status, solana_wallet_address, solana_private_key, card_limit, tron_wallet_address, tron_private_key) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, username, 0, eth_address, eth_private_key, "", 0, "", "", 0, solana_adr, solana_private_key, max_deposit_card_creation, tron_wallet, tron_pkey))
             await conn.commit()
 
 
@@ -43,10 +43,38 @@ async def user_solana_wallet_address_from_db(user_id):
             return wallet[0]
 
 
+async def user_tron_wallet_address_from_db(user_id):
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            result = await cursor.execute("SELECT tron_wallet_address FROM user WHERE user_id = ?", (user_id,))
+            wallet = await result.fetchone()
+            return wallet[0]
+
 async def update_eth_price_in_db(price):
     async with aiosqlite.connect(data_base) as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("UPDATE eth_price SET eth = ? WHERE status = ?", (price, "current_price",))
+            await conn.commit()
+
+
+async def update_bnb_price_in_db(price):
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE eth_price SET eth = ? WHERE status = ?", (price, "bnb_current_price",))
+            await conn.commit()
+
+
+async def update_matic_price_in_db(price):
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE eth_price SET eth = ? WHERE status = ?", (price, "matic_current_price",))
+            await conn.commit()
+
+
+async def update_trx_price_in_db(price):
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE eth_price SET eth = ? WHERE status = ?", (price, "trx_current_price",))
             await conn.commit()
 
 
@@ -68,6 +96,30 @@ async def get_fresh_eth_price():
     async with aiosqlite.connect(data_base) as conn:
         async with conn.cursor() as cursor:
             result = await cursor.execute("SELECT eth FROM eth_price WHERE status = ?", ("current_price",))
+            price = await result.fetchone()
+            return float(price[0])
+
+
+async def get_fresh_bnb_price():
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            result = await cursor.execute("SELECT eth FROM eth_price WHERE status = ?", ("bnb_current_price",))
+            price = await result.fetchone()
+            return float(price[0])
+
+
+async def get_fresh_matic_price():
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            result = await cursor.execute("SELECT eth FROM eth_price WHERE status = ?", ("matic_current_price",))
+            price = await result.fetchone()
+            return float(price[0])
+
+
+async def get_fresh_trx_price():
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            result = await cursor.execute("SELECT eth FROM eth_price WHERE status = ?", ("trx_current_price",))
             price = await result.fetchone()
             return float(price[0])
 
@@ -125,6 +177,15 @@ async def get_user_solana_chain_info(user_id):
     async with aiosqlite.connect(data_base) as conn:
         async with conn.cursor() as cursor:
             result = await cursor.execute("SELECT solana_wallet_address, solana_private_key FROM user WHERE user_id = ?", (user_id,))
+            info_list = await result.fetchall()
+            info = info_list[0]
+            return info[0], info[1]
+
+
+async def get_user_tron_chain_info(user_id):
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            result = await cursor.execute("SELECT tron_wallet_address, tron_private_key FROM user WHERE user_id = ?", (user_id,))
             info_list = await result.fetchall()
             info = info_list[0]
             return info[0], info[1]
@@ -301,10 +362,27 @@ async def add_new_tx_increase_limit(user_id, tx, usdt_value, zeno_value):
             await conn.commit()
 
 
+async def add_new_deposit_tx(user_id, tx, usdt_value, coin_value, operation_type):
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "INSERT INTO deposit_txs (user_id, tx, usdt_value, coin_value, status, operation_type) VALUES(?, ?, ?, ?, ?, ?)",
+                (user_id, tx, usdt_value, coin_value, first_stage_transfer, operation_type))
+            await conn.commit()
+
+
 async def get_tx_transfer_statuses():
     async with aiosqlite.connect(data_base) as conn:
         async with conn.cursor() as cursor:
             fetch_user_data = await cursor.execute("SELECT user_id, status FROM increase_limit_txs")
+            user_data = await fetch_user_data.fetchall()
+            return user_data
+
+
+async def get_tx_auto_transfer_statuses():
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            fetch_user_data = await cursor.execute("SELECT user_id, operation_type, status FROM deposit_txs")
             user_data = await fetch_user_data.fetchall()
             return user_data
 
@@ -316,6 +394,13 @@ async def update_tx_limit_status(user_id, status):
             await conn.commit()
 
 
+async def update_deposit_tx_status(user_id, status, pre_status):
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE deposit_txs SET status = ? WHERE user_id = ? AND status = ?", (status, user_id, pre_status,))
+            await conn.commit()
+
+
 async def get_zeno_amount_for_transfer(user_id):
     async with aiosqlite.connect(data_base) as conn:
         async with conn.cursor() as cursor:
@@ -324,9 +409,36 @@ async def get_zeno_amount_for_transfer(user_id):
             return zn_val[0]
 
 
+async def get_usdt_amount_for_transfer(user_id):
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            fetch_usdt_value = await cursor.execute("SELECT usdt_value FROM deposit_txs WHERE user_id = ? AND status = ?", (user_id, second_stage_transfer,))
+            usdt_val = await fetch_usdt_value.fetchone()
+            if usdt_val != None:
+                return int(usdt_val[0])
+            else:
+                return 0
+
+
+async def get_coin_amount_for_transfer(user_id):
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            fetch_coin_value = await cursor.execute("SELECT coin_value FROM deposit_txs WHERE user_id = ?", (user_id,))
+            coin_val = await fetch_coin_value.fetchone()
+            return coin_val[0]
+
+
 async def get_user_card_limit(user_id):
     async with aiosqlite.connect(data_base) as conn:
         async with conn.cursor() as cursor:
             fetch_card_limit = await cursor.execute("SELECT card_limit FROM user WHERE user_id = ?", (user_id,))
             card_limit = await fetch_card_limit.fetchone()
             return card_limit[0]
+
+
+async def insert_tron_data(user_id, tron_wallet, tron_pkey):
+    async with aiosqlite.connect(data_base) as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE user SET tron_wallet_address = ?, tron_private_key = ? WHERE user_id = ?", (tron_wallet, tron_pkey, user_id,))
+            await conn.commit()
+

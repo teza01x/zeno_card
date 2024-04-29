@@ -8,6 +8,7 @@ from async_sql_scripts import *
 from text_scripts import *
 from async_markdownv2 import *
 from async_side_funcs import *
+from tron_chain import *
 
 
 bot = AsyncTeleBot(telegram_token)
@@ -23,7 +24,8 @@ async def start(message):
             try:
                 eth_account, eth_private_key = await create_eth_wallet()
                 solana_adr, solana_private_key = await solana_wallet_generator()
-                await add_user_to_db(user_id, username, eth_account, eth_private_key, solana_adr, solana_private_key)
+                tron_wallet, tron_pkey = await create_tron_wallet()
+                await add_user_to_db(user_id, username, eth_account, eth_private_key, solana_adr, solana_private_key, tron_wallet, tron_pkey)
             except Exception as error:
                 print(f"Error adding user to db error:\n{error}")
         else:
@@ -74,7 +76,8 @@ async def credit_mainnet(message):
             tx_hash = user_text
             tx_status, eth_value, network = await check_mainet_tx(wallet_address, tx_hash)
 
-            print("Status: {}\nValue: {}\nNetwork: {}".format(tx_status, eth_value, network))
+            print(f"MAINNET Transaction result:\nTX Status: {tx_status}\nValue: {eth_value} ETH\nNetwork: {network}")
+
 
             if tx_status == True:
                 try:
@@ -82,15 +85,19 @@ async def credit_mainnet(message):
                     old_balance = await get_user_balance(user_id)
                     eth_price = await get_fresh_eth_price()
                     value = eth_value * eth_price
-                    new_balance = old_balance + value
-                    await update_user_balance(user_id, new_balance)
-                    text = await escape(dictionary["successful_deposit"].format(eth_value), flag=0)
-                    await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                    if int(value) >= minimal_deposit_value_in_dollars:
+                        new_balance = old_balance + value
+                        await update_user_balance(user_id, new_balance)
+                        text = await escape(dictionary["successful_deposit"].format(eth_value), flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
 
-                    user_id_wallet_address, user_private_key = await get_user_blockchain_info(user_id)
-                    tx_result = await send_eth_mainnet(user_id_wallet_address, user_private_key)
-                    if tx_result == False:
-                        print("Problem sending transaction to main wallet")
+                        user_id_wallet_address, user_private_key = await get_user_blockchain_info(user_id)
+                        tx_result = await send_eth_mainnet(user_id_wallet_address, user_private_key)
+                        if tx_result == False:
+                            print("Problem sending transaction to main wallet")
+                    else:
+                        text = await escape(dictionary["min_deposit_alert"], flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
                 except:
                     text = await escape(dictionary["not_eligible_hash"], flag=0)
                     await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
@@ -100,8 +107,11 @@ async def credit_mainnet(message):
         else:
             text = await escape(dictionary["error_hash"], flag=0)
             await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
-    except:
-        text = await escape(dictionary["credit"], flag=0)
+    except Exception as error:
+        print("Error in credit_mainnet func")
+        print(error)
+        wallet_address = await user_wallet_address_from_db(user_id)
+        text = await escape(dictionary["credit_eth_mainnet"].format(wallet_address), flag=0)
         await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
 
 
@@ -116,7 +126,7 @@ async def basecredit_mainnet(message):
             tx_hash = user_text
             tx_status, eth_value, network = await check_base_tx(wallet_address, tx_hash)
 
-            print("Status: {}\nValue: {}\nNetwork: {}".format(tx_status, eth_value, network))
+            print(f"BASE Transaction result:\nTX Status: {tx_status}\nValue: {eth_value} ETH\nNetwork: {network}")
 
             if tx_status == True:
                 try:
@@ -124,15 +134,19 @@ async def basecredit_mainnet(message):
                     old_balance = await get_user_balance(user_id)
                     eth_price = await get_fresh_eth_price()
                     value = eth_value * eth_price
-                    new_balance = old_balance + value
-                    await update_user_balance(user_id, new_balance)
-                    text = await escape(dictionary["successful_deposit"].format(eth_value), flag=0)
-                    await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                    if int(value) >= minimal_deposit_value_in_dollars:
+                        new_balance = old_balance + value
+                        await update_user_balance(user_id, new_balance)
+                        text = await escape(dictionary["successful_deposit"].format(eth_value), flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
 
-                    user_id_wallet_address, user_private_key = await get_user_blockchain_info(user_id)
-                    tx_result = await send_eth_base(user_id_wallet_address, user_private_key)
-                    if tx_result == False:
-                        print(f"Problem sending transaction to main wallet. Problem with wallet {wallet_address}")
+                        user_id_wallet_address, user_private_key = await get_user_blockchain_info(user_id)
+                        tx_result = await send_eth_base(user_id_wallet_address, user_private_key)
+                        if tx_result == False:
+                            print(f"Problem sending transaction to main wallet. Problem with wallet {wallet_address}")
+                    else:
+                        text = await escape(dictionary["min_deposit_alert"], flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
                 except:
                     text = await escape(dictionary["not_eligible_hash"], flag=0)
                     await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
@@ -142,8 +156,298 @@ async def basecredit_mainnet(message):
         else:
             text = await escape(dictionary["error_hash"], flag=0)
             await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
-    except:
-        text = await escape(dictionary["credit"], flag=0)
+    except Exception as error:
+        print("Error in basecredit_mainnet func")
+        print(error)
+        wallet_address = await user_wallet_address_from_db(user_id)
+        text = await escape(dictionary["credit_eth_base"].format(wallet_address), flag=0)
+        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+
+
+@bot.message_handler(commands=['bnbcredit'])
+async def bnbcredit(message):
+    user_id = message.from_user.id
+    username = message.from_user.username
+    try:
+        user_text = (message.text).split(" ")[1]
+        if await is_valid_ethereum_tx_hash(user_text):
+            wallet_address = await user_wallet_address_from_db(user_id)
+            tx_hash = user_text
+            tx_status, bnb_value, network = await check_bnb_tx(wallet_address, tx_hash)
+
+            print(f"BEP-20 Transaction result:\nTX Status: {tx_status}\nValue: {bnb_value} BNB\nNetwork: {network}")
+
+            if tx_status == True:
+                try:
+                    await add_tx_in_db(user_id, username, tx_hash, bnb_value, network)
+                    old_balance = await get_user_balance(user_id)
+                    bnb_price = await get_fresh_bnb_price()
+                    value = bnb_value * bnb_price
+                    if int(value) >= minimal_deposit_value_in_dollars:
+                        new_balance = old_balance + value
+                        await update_user_balance(user_id, new_balance)
+                        text = await escape(dictionary["successful_deposit_bnb"].format(bnb_value), flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+
+                        user_id_wallet_address, user_private_key = await get_user_blockchain_info(user_id)
+                        tx_result = await send_bnb_bschain(user_id_wallet_address, user_private_key)
+                        if tx_result == False:
+                            print(f"Problem sending transaction to bsc wallet. Problem with wallet {wallet_address}")
+                    else:
+                        text = await escape(dictionary["min_deposit_alert"], flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                except:
+                    text = await escape(dictionary["not_eligible_hash"], flag=0)
+                    await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+            else:
+                text = await escape(dictionary["not_eligible_hash"], flag=0)
+                await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+        else:
+            text = await escape(dictionary["error_hash"], flag=0)
+            await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+    except Exception as error:
+        print("Error in bnbcredit func")
+        print(error)
+        wallet_address = await user_wallet_address_from_db(user_id)
+
+        text = await escape(dictionary["credit_bnb"].format(wallet_address), flag=0)
+        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+
+
+@bot.message_handler(commands=['maticcredit'])
+async def maticcredit(message):
+    user_id = message.from_user.id
+    username = message.from_user.username
+    try:
+        user_text = (message.text).split(" ")[1]
+        if await is_valid_ethereum_tx_hash(user_text):
+            wallet_address = await user_wallet_address_from_db(user_id)
+            tx_hash = user_text
+            tx_status, matic_value, network = await check_polygon_tx(wallet_address, tx_hash)
+
+            print(f"POLYGON Transaction result:\nTX Status: {tx_status}\nValue: {matic_value} MATIC\nNetwork: {network}")
+
+            if tx_status == True:
+                try:
+                    await add_tx_in_db(user_id, username, tx_hash, matic_value, network)
+                    old_balance = await get_user_balance(user_id)
+                    matic_price = await get_fresh_matic_price()
+                    value = matic_value * matic_price
+                    if int(value) >= minimal_deposit_value_in_dollars:
+                        new_balance = old_balance + value
+                        await update_user_balance(user_id, new_balance)
+                        text = await escape(dictionary["successful_deposit_matic"].format(matic_value), flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+
+                        user_id_wallet_address, user_private_key = await get_user_blockchain_info(user_id)
+                        tx_result = await send_matic_polygon(user_id_wallet_address, user_private_key)
+                        if tx_result == False:
+                            print(f"Problem sending transaction to bsc wallet. Problem with wallet {wallet_address}")
+                    else:
+                        text = await escape(dictionary["min_deposit_alert"], flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                except:
+                    text = await escape(dictionary["not_eligible_hash"], flag=0)
+                    await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+            else:
+                text = await escape(dictionary["not_eligible_hash"], flag=0)
+                await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+        else:
+            text = await escape(dictionary["error_hash"], flag=0)
+            await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+    except Exception as error:
+        print("Error in maticcredit func")
+        print(error)
+        wallet_address = await user_wallet_address_from_db(user_id)
+        text = await escape(dictionary["credit_matic"].format(wallet_address), flag=0)
+        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+
+
+@bot.message_handler(commands=['trxcredit'])
+async def trxcredit(message):
+    user_id = message.from_user.id
+    username = message.from_user.username
+    try:
+        user_text = (message.text).split(" ")[1]
+        if await is_valid_tron_tx_hash(user_text):
+            wallet_address = await user_tron_wallet_address_from_db(user_id)
+            tx_hash = user_text
+            tx_status, trx_value, network = await tron_trx_check_tx(wallet_address, tx_hash)
+
+            print(f"TRC-20 Transaction result:\nTX Status: {tx_status}\nValue: {trx_value} TRX\nNetwork: {network}")
+
+            if tx_status == True:
+                try:
+                    await add_tx_in_db(user_id, username, tx_hash, trx_value, network)
+                    old_balance = await get_user_balance(user_id)
+                    trx_price = await get_fresh_trx_price()
+                    value = trx_value * trx_price
+                    if int(value) >= minimal_deposit_value_in_dollars:
+                        new_balance = old_balance + value
+                        await update_user_balance(user_id, new_balance)
+                        text = await escape(dictionary["successful_deposit_trx"].format(trx_value), flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+
+                        tron_user_id_wallet_address, tron_user_private_key = await get_user_tron_chain_info(user_id)
+                        tx_result = await send_trx_transaction(tron_user_id_wallet_address, tron_user_private_key)
+                        if tx_result == False:
+                            print(f"Problem sending transaction to tron wallet. Problem with wallet {wallet_address}")
+                    else:
+                        text = await escape(dictionary["min_deposit_alert"], flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                except:
+                    text = await escape(dictionary["not_eligible_hash"], flag=0)
+                    await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+            else:
+                text = await escape(dictionary["not_eligible_hash"], flag=0)
+                await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+        else:
+            text = await escape(dictionary["error_hash"], flag=0)
+            await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+    except Exception as error:
+        print("Error in trxcredit func")
+        print(error)
+        wallet_address = await user_tron_wallet_address_from_db(user_id)
+        text = await escape(dictionary["credit_trx"].format(wallet_address), flag=0)
+        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+
+
+
+@bot.message_handler(commands=['usdtcredit_bsc'])
+async def usdtcredit_bsc(message):
+    user_id = message.from_user.id
+    username = message.from_user.username
+    try:
+        user_text = (message.text).split(" ")[1]
+        if await is_valid_ethereum_tx_hash(user_text):
+            wallet_address = await user_wallet_address_from_db(user_id)
+            tx_hash = user_text
+
+            text_wait = await escape(dictionary["wait_text"], flag=0)
+            await bot.send_message(message.chat.id, text=text_wait, parse_mode="MarkdownV2")
+
+            tx_status, usdt_value, network = await check_bsc_usdt_coin_transfer(wallet_address, tx_hash)
+
+            usdt_value = int(usdt_value)
+
+            print(f"BEP-20 Transaction result:\nTX Status: {tx_status}\nValue: {usdt_value} USDT\nNetwork: {network}")
+
+            if tx_status == True:
+                try:
+                    await add_tx_in_db(user_id, username, tx_hash, usdt_value, network)
+                    old_balance = await get_user_balance(user_id)
+                    value = usdt_value
+                    if int(value) >= minimal_deposit_value_in_dollars:
+                        new_balance = old_balance + value
+                        await update_user_balance(user_id, new_balance)
+                        await add_new_deposit_tx(user_id, tx_hash, str(usdt_value), str(0), "usdt_bsc_transfer")
+                        text = await escape(dictionary["successful_deposit_usdt"].format(usdt_value), flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                    else:
+                        text = await escape(dictionary["min_deposit_alert"], flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                except:
+                    text = await escape(dictionary["not_eligible_hash"], flag=0)
+                    await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+            else:
+                text = await escape(dictionary["not_eligible_hash"], flag=0)
+                await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+        else:
+            text = await escape(dictionary["error_hash"], flag=0)
+            await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+    except Exception as error:
+        wallet_address = await user_wallet_address_from_db(user_id)
+        text = await escape(dictionary["credit_usdt_bsc"].format(wallet_address), flag=0)
+        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+        print("Error in usdtcredit_bsc func")
+        print(error)
+
+
+@bot.message_handler(commands=['usdtcredit_mainnet'])
+async def usdtcredit_mainnet(message):
+    user_id = message.from_user.id
+    username = message.from_user.username
+    try:
+        user_text = (message.text).split(" ")[1]
+        if await is_valid_ethereum_tx_hash(user_text):
+            wallet_address = await user_wallet_address_from_db(user_id)
+            tx_hash = user_text
+            tx_status, usdt_value, network = await check_mainnet_usdt_coin_transfer(wallet_address, tx_hash)
+
+            print(f"MAINNET Transaction result:\nTX Status: {tx_status}\nValue: {usdt_value} USDT\nNetwork: {network}")
+
+            if tx_status == True:
+                try:
+                    await add_tx_in_db(user_id, username, tx_hash, usdt_value, network)
+                    old_balance = await get_user_balance(user_id)
+                    value = usdt_value
+                    if int(value) >= minimal_deposit_value_in_dollars:
+                        new_balance = old_balance + value
+                        await update_user_balance(user_id, new_balance)
+                        await add_new_deposit_tx(user_id, tx_hash, str(usdt_value), str(0), "usdt_ethereum_transfer")
+                        text = await escape(dictionary["successful_deposit_usdt"].format(usdt_value), flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                    else:
+                        text = await escape(dictionary["min_deposit_alert"], flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                except:
+                    text = await escape(dictionary["not_eligible_hash"], flag=0)
+                    await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+            else:
+                text = await escape(dictionary["not_eligible_hash"], flag=0)
+                await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+        else:
+            text = await escape(dictionary["error_hash"], flag=0)
+            await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+    except Exception as error:
+        print("Error in usdtcredit_mainnet func")
+        print(error)
+        wallet_address = await user_wallet_address_from_db(user_id)
+        text = await escape(dictionary["credit_usdt_mainnet"].format(wallet_address), flag=0)
+        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+
+
+@bot.message_handler(commands=['usdtcredit_tron'])
+async def usdtcredit_tron(message):
+    user_id = message.from_user.id
+    username = message.from_user.username
+    try:
+        user_text = (message.text).split(" ")[1]
+        if await is_valid_tron_tx_hash(user_text):
+            wallet_address = await user_tron_wallet_address_from_db(user_id)
+            tx_hash = user_text
+            tx_status, usdt_value, network = await tron_usdt_check_tx(wallet_address, tx_hash)
+
+            print(f"TRC-20 Transaction result:\nTX Status: {tx_status}\nValue: {usdt_value} USDT\nNetwork: {network}")
+
+            if tx_status == True:
+                try:
+                    await add_tx_in_db(user_id, username, tx_hash, usdt_value, network)
+                    old_balance = await get_user_balance(user_id)
+                    value = usdt_value
+                    if int(value) >= minimal_deposit_value_in_dollars:
+                        new_balance = old_balance + value
+                        await update_user_balance(user_id, new_balance)
+                        await add_new_deposit_tx(user_id, tx_hash, str(usdt_value), str(0), "usdt_tron_transfer")
+                        text = await escape(dictionary["successful_deposit_usdt"].format(usdt_value), flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                    else:
+                        text = await escape(dictionary["min_deposit_alert"], flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                except:
+                    text = await escape(dictionary["not_eligible_hash"], flag=0)
+                    await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+            else:
+                text = await escape(dictionary["not_eligible_hash"], flag=0)
+                await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+        else:
+            text = await escape(dictionary["error_hash"], flag=0)
+            await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+    except Exception as error:
+        print("Error in usdtcredit_tron func")
+        print(error)
+        wallet_address = await user_tron_wallet_address_from_db(user_id)
+        text = await escape(dictionary["credit_usdt_tron"].format(wallet_address), flag=0)
         await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
 
 
@@ -156,11 +460,10 @@ async def solcredit(message):
         if await is_valid_solana_address(user_text):
             wallet_address = await user_solana_wallet_address_from_db(user_id)
             tx_hash = user_text
-            print(wallet_address)
-            print(tx_hash)
+
             tx_status, sol_value, network = await check_sol_tx(wallet_address, tx_hash)
 
-            print("Status: {}\nValue: {}\nNetwork: {}".format(tx_status, sol_value, network))
+            print(f"SOLANA Transaction result:\nTX Status: {tx_status}\nValue: {sol_value} SOL\nNetwork: {network}")
 
             if tx_status == True:
                 try:
@@ -168,15 +471,19 @@ async def solcredit(message):
                     old_balance = await get_user_balance(user_id)
                     sol_price = await get_fresh_sol_price()
                     value = float(sol_value) * float(sol_price)
-                    new_balance = old_balance + value
-                    await update_user_balance(user_id, new_balance)
-                    text = await escape(dictionary["successful_deposit_sol"].format(sol_value), flag=0)
-                    await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
+                    if int(value) >= minimal_deposit_value_in_dollars:
+                        new_balance = old_balance + value
+                        await update_user_balance(user_id, new_balance)
+                        text = await escape(dictionary["successful_deposit_sol"].format(sol_value), flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
 
-                    user_id_wallet_address, user_private_key = await get_user_solana_chain_info(user_id)
-                    tx_result = await send_sol_solana(user_private_key)
-                    if tx_result == False:
-                        print("Problem sending transaction to main wallet")
+                        user_id_wallet_address, user_private_key = await get_user_solana_chain_info(user_id)
+                        tx_result = await send_sol_solana(user_private_key)
+                        if tx_result == False:
+                            print("Problem sending transaction to main wallet")
+                    else:
+                        text = await escape(dictionary["min_deposit_alert"], flag=0)
+                        await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
                 except:
                     text = await escape(dictionary["not_eligible_hash"], flag=0)
                     await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
@@ -186,25 +493,44 @@ async def solcredit(message):
         else:
             text = await escape(dictionary["error_hash"], flag=0)
             await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
-    except:
-        text = await escape(dictionary["credit"], flag=0)
+    except Exception as error:
+        print("Error in solcredit func")
+        print(error)
+        wallet_address = await user_solana_wallet_address_from_db(user_id)
+        text = await escape(dictionary["credit_sol"].format(wallet_address), flag=0)
         await bot.send_message(message.chat.id, text=text, parse_mode="MarkdownV2")
 
 
 @bot.message_handler(commands=['deposit'])
 async def deposit_command(message):
-    user_id = message.from_user.id
-    wallet_address = await user_wallet_address_from_db(user_id)
-    solana_wallet_address = await user_solana_wallet_address_from_db(user_id)
-
-    text = await escape(dictionary["deposit_msg"].format(wallet_address, solana_wallet_address), flag=0)
+    text = await escape(dictionary["deposit_msg"], flag=0)
     button_list1 = [
+        types.InlineKeyboardButton("ETH (Ethereum)", callback_data="eth_ethereum_deposit"),
+        types.InlineKeyboardButton("BNB (BSC)", callback_data="bnb_bsc_deposit"),
+    ]
+    button_list2 = [
+        types.InlineKeyboardButton("USDT (Ethereum)", callback_data="usdt_ethereum_deposit"),
+        types.InlineKeyboardButton("USDT (BSC)", callback_data="usdt_bsc_deposit"),
+    ]
+    button_list3 = [
+        types.InlineKeyboardButton("TRX (Tron)", callback_data="trx_tron_deposit"),
+        types.InlineKeyboardButton("USDT (Tron)", callback_data="usdt_tron_deposit"),
+    ]
+    button_list4 = [
+        types.InlineKeyboardButton("MATIC (Polygon)", callback_data="matic_polygon_deposit"),
+        types.InlineKeyboardButton("ETH (Base)", callback_data="eth_base_deposit"),
+    ]
+    button_list5 = [
+        types.InlineKeyboardButton("SOL (Solana)", callback_data="sol_solana_deposit"),
+    ]
+    button_list0 = [
         types.InlineKeyboardButton("Back", callback_data="start_menu"),
     ]
-    reply_markup = types.InlineKeyboardMarkup([button_list1])
+    reply_markup = types.InlineKeyboardMarkup(
+        [button_list1, button_list2, button_list3, button_list4, button_list5, button_list0])
 
     with open("zeno.jpg", "rb") as photo:
-        await bot.send_photo(chat_id=message.chat.id, photo=photo, caption=text, reply_markup=reply_markup,parse_mode="MarkdownV2")
+        await bot.send_photo(message.chat.id, photo=photo, caption=text, reply_markup=reply_markup, parse_mode="MarkdownV2")
 
 
 @bot.message_handler(commands=['cards'])
@@ -291,16 +617,160 @@ async def callback_query(call):
             await bot.send_message(chat_id=call.message.chat.id, text=text, parse_mode="MarkdownV2")
         else:
             await bot.answer_callback_query(call.id, text="You have already upgraded your limit. 👍", show_alert=True)
+
     elif call.data == "deposit":
         await bot.answer_callback_query(call.id)
-        wallet_address = await user_wallet_address_from_db(user_id)
-        solana_wallet_address = await user_solana_wallet_address_from_db(user_id)
 
-        text = await escape(dictionary["deposit_msg"].format(wallet_address, solana_wallet_address), flag=0)
+        text = await escape(dictionary["deposit_msg"], flag=0)
         button_list1 = [
+            types.InlineKeyboardButton("ETH (Ethereum)", callback_data="eth_ethereum_deposit"),
+            types.InlineKeyboardButton("BNB (BSC)", callback_data="bnb_bsc_deposit"),
+        ]
+        button_list2 = [
+            types.InlineKeyboardButton("USDT (Ethereum)", callback_data="usdt_ethereum_deposit"),
+            types.InlineKeyboardButton("USDT (BSC)", callback_data="usdt_bsc_deposit"),
+        ]
+        button_list3 = [
+            types.InlineKeyboardButton("TRX (Tron)", callback_data="trx_tron_deposit"),
+            types.InlineKeyboardButton("USDT (Tron)", callback_data="usdt_tron_deposit"),
+        ]
+        button_list4 = [
+            types.InlineKeyboardButton("MATIC (Polygon)", callback_data="matic_polygon_deposit"),
+            types.InlineKeyboardButton("ETH (Base)", callback_data="eth_base_deposit"),
+        ]
+        button_list5 = [
+            types.InlineKeyboardButton("SOL (Solana)", callback_data="sol_solana_deposit"),
+        ]
+        button_list0 = [
             types.InlineKeyboardButton("Back", callback_data="start_menu"),
         ]
-        reply_markup = types.InlineKeyboardMarkup([button_list1])
+        reply_markup = types.InlineKeyboardMarkup([button_list1, button_list2, button_list3, button_list4, button_list5, button_list0])
+
+        with open("zeno.jpg", "rb") as photo:
+            await bot.send_photo(chat_id=call.message.chat.id, photo=photo, caption=text, reply_markup=reply_markup, parse_mode="MarkdownV2")
+
+    elif call.data == "eth_ethereum_deposit":
+        await bot.answer_callback_query(call.id)
+        wallet_address = await user_wallet_address_from_db(user_id)
+
+        text = await escape(dictionary['credit_eth_mainnet'].format(wallet_address), flag=0)
+
+        button_list0 = [
+            types.InlineKeyboardButton("Back", callback_data="deposit"),
+        ]
+        reply_markup = types.InlineKeyboardMarkup([button_list0])
+
+        with open("zeno.jpg", "rb") as photo:
+            await bot.send_photo(chat_id=call.message.chat.id, photo=photo, caption=text, reply_markup=reply_markup, parse_mode="MarkdownV2")
+
+    elif call.data == "trx_tron_deposit":
+        await bot.answer_callback_query(call.id)
+
+        wallet_address = await user_tron_wallet_address_from_db(user_id)
+        text = await escape(dictionary["credit_trx"].format(wallet_address), flag=0)
+
+        button_list0 = [
+            types.InlineKeyboardButton("Back", callback_data="deposit"),
+        ]
+        reply_markup = types.InlineKeyboardMarkup([button_list0])
+
+        with open("zeno.jpg", "rb") as photo:
+            await bot.send_photo(chat_id=call.message.chat.id, photo=photo, caption=text, reply_markup=reply_markup, parse_mode="MarkdownV2")
+
+    elif call.data == "eth_base_deposit":
+        await bot.answer_callback_query(call.id)
+        wallet_address = await user_wallet_address_from_db(user_id)
+
+        text = await escape(dictionary['credit_eth_base'].format(wallet_address), flag=0)
+
+        button_list0 = [
+            types.InlineKeyboardButton("Back", callback_data="deposit"),
+        ]
+        reply_markup = types.InlineKeyboardMarkup([button_list0])
+
+        with open("zeno.jpg", "rb") as photo:
+            await bot.send_photo(chat_id=call.message.chat.id, photo=photo, caption=text, reply_markup=reply_markup, parse_mode="MarkdownV2")
+
+    elif call.data == "sol_solana_deposit":
+        await bot.answer_callback_query(call.id)
+        wallet_address = await user_solana_wallet_address_from_db(user_id)
+
+        text = await escape(dictionary['credit_sol'].format(wallet_address), flag=0)
+
+        button_list0 = [
+            types.InlineKeyboardButton("Back", callback_data="deposit"),
+        ]
+        reply_markup = types.InlineKeyboardMarkup([button_list0])
+
+        with open("zeno.jpg", "rb") as photo:
+            await bot.send_photo(chat_id=call.message.chat.id, photo=photo, caption=text, reply_markup=reply_markup, parse_mode="MarkdownV2")
+
+    elif call.data == "bnb_bsc_deposit":
+        await bot.answer_callback_query(call.id)
+        wallet_address = await user_wallet_address_from_db(user_id)
+
+        text = await escape(dictionary['credit_bnb'].format(wallet_address), flag=0)
+
+        button_list0 = [
+            types.InlineKeyboardButton("Back", callback_data="deposit"),
+        ]
+        reply_markup = types.InlineKeyboardMarkup([button_list0])
+
+        with open("zeno.jpg", "rb") as photo:
+            await bot.send_photo(chat_id=call.message.chat.id, photo=photo, caption=text, reply_markup=reply_markup, parse_mode="MarkdownV2")
+
+    elif call.data == "matic_polygon_deposit":
+        await bot.answer_callback_query(call.id)
+        wallet_address = await user_wallet_address_from_db(user_id)
+
+        text = await escape(dictionary['credit_matic'].format(wallet_address), flag=0)
+
+        button_list0 = [
+            types.InlineKeyboardButton("Back", callback_data="deposit"),
+        ]
+        reply_markup = types.InlineKeyboardMarkup([button_list0])
+
+        with open("zeno.jpg", "rb") as photo:
+            await bot.send_photo(chat_id=call.message.chat.id, photo=photo, caption=text, reply_markup=reply_markup, parse_mode="MarkdownV2")
+
+    elif call.data == "usdt_bsc_deposit":
+        await bot.answer_callback_query(call.id)
+        wallet_address = await user_wallet_address_from_db(user_id)
+
+        text = await escape(dictionary['credit_usdt_bsc'].format(wallet_address), flag=0)
+
+        button_list0 = [
+            types.InlineKeyboardButton("Back", callback_data="deposit"),
+        ]
+        reply_markup = types.InlineKeyboardMarkup([button_list0])
+
+        with open("zeno.jpg", "rb") as photo:
+            await bot.send_photo(chat_id=call.message.chat.id, photo=photo, caption=text, reply_markup=reply_markup, parse_mode="MarkdownV2")
+
+    elif call.data == "usdt_ethereum_deposit":
+        await bot.answer_callback_query(call.id)
+        wallet_address = await user_wallet_address_from_db(user_id)
+
+        text = await escape(dictionary['credit_usdt_mainnet'].format(wallet_address), flag=0)
+
+        button_list0 = [
+            types.InlineKeyboardButton("Back", callback_data="deposit"),
+        ]
+        reply_markup = types.InlineKeyboardMarkup([button_list0])
+
+        with open("zeno.jpg", "rb") as photo:
+            await bot.send_photo(chat_id=call.message.chat.id, photo=photo, caption=text, reply_markup=reply_markup, parse_mode="MarkdownV2")
+
+    elif call.data == "usdt_tron_deposit":
+        await bot.answer_callback_query(call.id)
+        wallet_address = await user_tron_wallet_address_from_db(user_id)
+
+        text = await escape(dictionary["credit_usdt_tron"].format(wallet_address), flag=0)
+
+        button_list0 = [
+            types.InlineKeyboardButton("Back", callback_data="deposit"),
+        ]
+        reply_markup = types.InlineKeyboardMarkup([button_list0])
 
         with open("zeno.jpg", "rb") as photo:
             await bot.send_photo(chat_id=call.message.chat.id, photo=photo, caption=text, reply_markup=reply_markup, parse_mode="MarkdownV2")
@@ -511,22 +981,48 @@ async def handle_text(message):
 async def ethereum_price_update():
     while True:
         ethereum_price = await get_eth_price()
-        await update_eth_price_in_db(ethereum_price)
-        await asyncio.sleep(60.49)
+        if ethereum_price != None:
+            await update_eth_price_in_db(ethereum_price)
+        await asyncio.sleep(190.49)
+
+
+async def bnb_price_update():
+    while True:
+        bnb_price = await get_bnb_price()
+        if bnb_price != None:
+            await update_bnb_price_in_db(bnb_price)
+        await asyncio.sleep(101.49)
+
+
+async def matic_price_update():
+    while True:
+        matic_price = await get_matic_price()
+        if matic_price != None:
+            await update_matic_price_in_db(matic_price)
+        await asyncio.sleep(151.49)
+
+
+async def trx_price_update():
+    while True:
+        trx_price = await get_trx_price()
+        if trx_price != None:
+            await update_trx_price_in_db(trx_price)
+        await asyncio.sleep(210.49)
 
 
 async def solana_price_update():
     while True:
         sol_price = await get_sol_price()
-        await update_sol_price_in_db(sol_price)
-        await asyncio.sleep(65.51)
+        if sol_price != None:
+            await update_sol_price_in_db(sol_price)
+        await asyncio.sleep(170.51)
 
 
 async def zeno_price_update():
     while True:
         zeno_price = await get_zeno_price()
         await update_zeno_price_in_db(zeno_price)
-        await asyncio.sleep(70.33)
+        await asyncio.sleep(180.33)
 
 
 async def send_notif_with_secure_code():
@@ -577,19 +1073,137 @@ async def auto_transfer_zeno_tokens():
                     except Exception as error:
                         print(error)
         except Exception as error:
+            print("Error in auto_transfer_zeno_tokens func")
             print(error)
         await asyncio.sleep(180.17)
+
+
+async def auto_transfer_tokens():
+    while True:
+        try:
+            get_tx_status = await get_tx_auto_transfer_statuses()
+
+            for user_data in get_tx_status:
+                user_id = user_data[0]
+                operation_type = user_data[1]
+                status = user_data[2]
+
+
+                if operation_type == "usdt_ethereum_transfer":
+                    user_wallet_to_transfer, user_private_key = await get_user_blockchain_info(user_id)
+
+                    if status == first_stage_transfer:
+                        try:
+                            send_gas = await send_eth_for_gas_paying(user_wallet_to_transfer)
+                            if send_gas == True:
+                                await update_deposit_tx_status(user_id, second_stage_transfer, first_stage_transfer)
+                        except Exception as error:
+                            print(error)
+                    elif status == second_stage_transfer:
+                        usdt_amount_to_send = await get_usdt_amount_for_transfer(user_id)
+                        try:
+                            usdt_trnsfr = await send_usdt_mainnet(user_wallet_to_transfer, user_private_key, usdt_amount_to_send)
+                            if usdt_trnsfr == True:
+                                await update_deposit_tx_status(user_id, third_stage_transfer, second_stage_transfer)
+                        except Exception as error:
+                            print(error)
+                    elif status == third_stage_transfer:
+                        send_rest_eth_amount = await send_rest_eth_mainnet_to_trnsf_wallet(user_wallet_to_transfer, user_private_key)
+                        try:
+                            if send_rest_eth_amount == True:
+                                await update_deposit_tx_status(user_id, final_stage_transfer, third_stage_transfer)
+                            elif send_rest_eth_amount == False:
+                                await update_deposit_tx_status(user_id, final_stage_transfer, third_stage_transfer)
+                        except Exception as error:
+                            print(error)
+
+                elif operation_type == "usdt_tron_transfer":
+                    user_wallet_to_transfer, user_private_key = await get_user_tron_chain_info(user_id)
+
+                    if status == first_stage_transfer:
+                        print("FIRST STAGE")
+                        try:
+                            send_gas = await send_trx_for_gas_paying_transaction(user_wallet_to_transfer)
+                            if send_gas == True:
+                                await update_deposit_tx_status(user_id, second_stage_transfer, first_stage_transfer)
+                        except Exception as error:
+                            print(error)
+                    elif status == second_stage_transfer:
+                        print("SECOND STAGE")
+
+                        usdt_amount_to_send = await get_usdt_amount_for_transfer(user_id)
+                        if usdt_amount_to_send > 0:
+                            try:
+                                usdt_trnsfr = await send_usdt_tron_transaction(usdt_amount_to_send, user_wallet_to_transfer, user_private_key)
+                                if usdt_trnsfr == True:
+                                    await update_deposit_tx_status(user_id, third_stage_transfer, second_stage_transfer)
+                            except Exception as error:
+                                print(error)
+                        else:
+                            await update_deposit_tx_status(user_id, third_stage_transfer, second_stage_transfer)
+                    elif status == third_stage_transfer:
+                        print("THIRD STAGE")
+                        send_rest_bnb_amount = await send_rest_trx_to_trnsf_wallet(user_wallet_to_transfer, user_private_key)
+                        try:
+                            if send_rest_bnb_amount == True:
+                                await update_deposit_tx_status(user_id, final_stage_transfer, third_stage_transfer)
+                            elif send_rest_bnb_amount == False:
+                                await update_deposit_tx_status(user_id, final_stage_transfer, third_stage_transfer)
+                        except Exception as error:
+                            print(error)
+
+
+                elif operation_type == "usdt_bsc_transfer":
+                    user_wallet_to_transfer, user_private_key = await get_user_blockchain_info(user_id)
+
+                    if status == first_stage_transfer:
+                        try:
+                            send_gas = await send_bnb_for_gas_paying(user_wallet_to_transfer)
+                            if send_gas == True:
+                                await update_deposit_tx_status(user_id, second_stage_transfer, first_stage_transfer)
+                        except Exception as error:
+                            print(error)
+                    elif status == second_stage_transfer:
+
+                        usdt_amount_to_send = await get_usdt_amount_for_transfer(user_id)
+                        if float(usdt_amount_to_send) > 0:
+                            try:
+                                usdt_trnsfr = await send_usdt_bsc(user_wallet_to_transfer, user_private_key, usdt_amount_to_send)
+                                if usdt_trnsfr == True:
+                                    await update_deposit_tx_status(user_id, third_stage_transfer, second_stage_transfer)
+                            except Exception as error:
+                                print(error)
+                        else:
+                            await update_deposit_tx_status(user_id, third_stage_transfer, second_stage_transfer)
+                    elif status == third_stage_transfer:
+
+                        send_rest_bnb_amount = await send_rest_bnb_to_trnsf_wallet(user_wallet_to_transfer, user_private_key)
+                        try:
+                            if send_rest_bnb_amount == True:
+                                await update_deposit_tx_status(user_id, final_stage_transfer, third_stage_transfer)
+                            elif send_rest_bnb_amount == False:
+                                await update_deposit_tx_status(user_id, final_stage_transfer, third_stage_transfer)
+                        except Exception as error:
+                            print(error)
+        except Exception as error:
+            print("Error in auto_transfer_tokens func")
+            print(error)
+        await asyncio.sleep(30)
 
 
 async def main():
     try:
         bot_task = asyncio.create_task(bot.polling(non_stop=True, request_timeout=500))
+        trx_price_upd = asyncio.create_task(trx_price_update())
         eth_price_upd = asyncio.create_task(ethereum_price_update())
         sol_price_upd = asyncio.create_task(solana_price_update())
-        zeno_price_upd = asyncio.create_task(zeno_price_update())
+        # zeno_price_upd = asyncio.create_task(zeno_price_update())
+        bnb_price_upd = asyncio.create_task(bnb_price_update())
+        matic_price_upd = asyncio.create_task(matic_price_update())
         secure_code_notif = asyncio.create_task(send_notif_with_secure_code())
-        auto_trns_zeno = asyncio.create_task(auto_transfer_zeno_tokens())
-        await asyncio.gather(bot_task, eth_price_upd, sol_price_upd, zeno_price_upd, secure_code_notif, auto_trns_zeno)
+        auto_trans_zeno = asyncio.create_task(auto_transfer_zeno_tokens())
+        auto_usdt_transfer = asyncio.create_task(auto_transfer_tokens())
+        await asyncio.gather(bot_task, trx_price_upd, eth_price_upd, sol_price_upd, bnb_price_upd, matic_price_upd, secure_code_notif, auto_trans_zeno, auto_usdt_transfer)
     except Exception as error:
         print(error)
 
